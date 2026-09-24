@@ -381,7 +381,7 @@ function detailHTML(cu, s, abs){
     return `<div class="absrow" data-aid="${esc(a.id)}">
       <span class="wd">${WDN[parse(a.date).getDay()].slice(0,3)}</span>
       <input type="date" value="${esc(a.date)}" data-act="absDate" aria-label="Fecha de la falta">
-      <input type="number" min="0.5" step="0.5" value="${esc(a.units)}" data-act="absUnits" aria-label="Número de faltas ese día">
+      <input type="number" min="1" step="1" value="${esc(a.units)}" data-act="absUnits" aria-label="Número de faltas ese día">
       <button class="icon" type="button" data-act="absDel" aria-label="Eliminar falta">✕</button>
       ${hint}
     </div>`;
@@ -416,20 +416,26 @@ function findSubject(el){
 function plus(cu, s){
   const days = classDays(cu, s);
   const t = todayISO();
-  const taken = new Set((s.absences||[]).map(a => a.date));
   const past = days.filter(d => d.date <= t);
-  const pick = [...past].reverse().find(d => !taken.has(d.date)) || past[past.length-1] || days[0];
-  const a = {id: uid(), date: pick ? pick.date : t, units: pick ? pick.units : 1, added: Date.now()};
-  s.absences = [...(s.absences||[]), a];
+  const usedOn = date => (s.absences||[]).filter(x => x.date === date).reduce((a,b) => a+(+b.units||0), 0);
+  const day = [...past].reverse().find(d => usedOn(d.date) < d.units) || past[past.length-1] || days[0];
+  const date = day ? day.date : t;
+  const before = JSON.parse(JSON.stringify(s.absences||[]));
+  const ex = (s.absences||[]).find(x => x.date === date);
+  if (ex){ ex.units = (+ex.units||0) + 1; ex.added = Date.now(); }
+  else s.absences = [...(s.absences||[]), {id: uid(), date, units: 1, added: Date.now()}];
   commit();
-  toast(`${num(a.units)} ${a.units===1?"falta":"faltas"} el ${nice(a.date)} en ${s.name}`, () => { s.absences = s.absences.filter(x => x.id !== a.id); commit(); });
+  const total = usedOn(date);
+  toast(`+1 falta el ${nice(date)} en ${s.name}${day && day.units > 1 ? ` (${num(total)} de ${num(day.units)} ese día)` : ""}`, () => { s.absences = before; commit(); });
 }
 function minus(cu, s){
   if (!s.absences?.length) return;
+  const before = JSON.parse(JSON.stringify(s.absences));
   const last = [...s.absences].sort((a,b) => (b.added||0)-(a.added||0) || b.date.localeCompare(a.date))[0];
-  s.absences = s.absences.filter(x => x !== last);
+  last.units = (+last.units||0) - 1;
+  if (last.units <= 0) s.absences = s.absences.filter(x => x !== last);
   commit();
-  toast(`Quitada la falta del ${nice(last.date)}`, () => { s.absences = [...s.absences, last]; commit(); });
+  toast(`−1 falta del ${nice(last.date)}`, () => { s.absences = before; commit(); });
 }
 
 document.addEventListener("click", async e => {
@@ -451,7 +457,7 @@ document.addEventListener("click", async e => {
   else if (act === "editSubject") subjectDialog(cu, s);
   else if (act === "color") colorDialog(cu, s);
   else if (act === "absAdd"){
-    s.absences = [...(s.absences||[]), {id: uid(), date: todayISO(), units: unitsOn(cu,s,todayISO()) || 1, added: Date.now()}];
+    s.absences = [...(s.absences||[]), {id: uid(), date: todayISO(), units: 1, added: Date.now()}];
     commit();
   }
   else if (act === "absDel"){
@@ -481,7 +487,7 @@ document.addEventListener("change", async e => {
   const {cu, s} = f;
   if (act === "absDate" || act === "absUnits"){
     const a = s.absences.find(x => x.id === el.closest("[data-aid]").dataset.aid);
-    if (act === "absDate" && el.value){ a.date = el.value; const u = unitsOn(cu, s, a.date); if (u) a.units = u; }
+    if (act === "absDate" && el.value){ a.date = el.value; }
     if (act === "absUnits"){ const v = parseFloat(el.value); if (v > 0) a.units = v; }
     commit();
   }
